@@ -46,6 +46,12 @@ export default class DB{
             console.warn(`[db][${Date.now()}]`, ...rest)
         }
     }
+    makeError(errno, msg){
+        return {
+            errno,
+            msg
+        }
+    }
 
     // async open(){
     //     return DB._openDB(this.config.db).then(db=>{
@@ -100,8 +106,13 @@ export default class DB{
     //         }
     //     })
     // }
-    async open(){
-        return DB._openDB(this.config.db)
+    async open(handler){
+        return DB._openDB(this.config.db).then(db=>{
+            let ret = handler?.(db)
+            db.close()
+            db = null
+            return ret
+        })
     }
 
     constructor(config){
@@ -117,7 +128,7 @@ export default class DB{
     }
 
     async init(){
-        return DB._openDB(this.config.db).then(db=>{
+        return this.open(async db=>{
             // 检查当前版本是否与配置不符，如果不符则创建新的版本
             let difference = this._getDifferenceWithCurrentConfig(db)
             this.debug(`检查配置发现配置修改(amount: ${difference?.length || 0}): `, difference)
@@ -125,7 +136,7 @@ export default class DB{
                 // 有不同，确定是否需要升级同意问询
                 let isNeedUpdatePromise = false
                 for(let diffItem of difference){
-                    if(/^modify/.test(diffItem.type)){
+                    if(/^(modify)|(delete)/.test(diffItem.type)){
                         // needUpgrade
                         isNeedUpdatePromise = true
                         break
@@ -136,11 +147,10 @@ export default class DB{
                     // upgradePromise
                     p = this._getUpgradePromise()
                 }
-                p.then(()=>{
-                    return new Promise((r, reject)=>{
+                return new Promise((r, reject)=>{
+                    p.then(()=>{
                         let version = db.version
                         this.debug(`同意升级，开始升级(currentVersion: ${version})`)
-                        db.close()
                         let req = indexedDB.open(this.config.db, ++version)
                         req.onerror = reject
                         // onsuccess 和onupgradeneeded会同时触发
@@ -151,22 +161,21 @@ export default class DB{
                         // }
                         req.onupgradeneeded = e=>{
                             // new db
-                            db = e.target.result
+                            let newDb = e.target.result
                             difference.forEach(d=>{
-                                this.doDiffItem(db, d)
+                                this.doDiffItem(newDb, d)
                             })
+                            newDb.close()
+                            newDb = null
                             r()
                         }
+                    }).catch(err=>{
+                        reject(this.makeError(ERR_UPGRADE, err))
                     })
-                }).catch(err=>{
-                    this.error(ERR_UPGRADE, '升级失败: ', err)
-                    throw err
-                })
-                p.catch(err=>{
-                    this.warn('不同意升级: ',err)
-                })
-                return p.finally(()=>{
-                    db.close()
+                    p.catch(err=>{
+                        this.warn(`不同意升级${err && ': ' || ''}`, err)
+                        r()
+                    })
                 })
             }
         }).then(()=>{
@@ -175,7 +184,9 @@ export default class DB{
             return this
         }).catch(err=>{
             this._isInited = false
-            this.error('数据库初始化失败: ', err)
+            if(err.errno){
+                this.error(err.errno, '初始化失败', err.msg)
+            }
             throw err
         })
     }
@@ -190,16 +201,9 @@ export default class DB{
     }
 
     async objectStoreNames(){
-        console.time('open')
-        let db = await this.open()
-        console.timeEnd('open')
-        console.time('names')
-        let names = db.objectStoreNames
-        console.timeEnd('names')
-        console.time('close')
-        db.close()
-        console.timeEnd('close')
-        return [...names]
+        return await this.open(async db=>{
+            return [...db.objectStoreNames]
+        })
     }
 
     _getUpgradePromise(){
@@ -356,28 +360,28 @@ export default class DB{
         let transactionFuncs = {
             store: name=>storeFuncs({name}),
             do: async ()=>{
-                let db = await this.open()
-                let transaction = db.transaction(names, ...rest)
-                ops.forEach(op=>{
-                    let { id } = op
-                    let p = this.doOp(op, transaction)
-                    p.then(promiseOps[id].r).catch(promiseOps[id])
-                    promises[id] = p
-                })
-                return new Promise((r, reject)=>{
-                    transaction.onerror = reject
-                    transaction.oncomplete = async e=>{
-                        this.debug('transaction complete: ', e)
-                        let res = (await Promise.all(Object.values(promises).sort((a, b)=>a.i - b.i))) || []
-                        r(res)
-                    }
-                    transaction.onabort = reject
-                }).finally(()=>{
-                    db.close()
-                    ops = []
-                    promises = {}
-                    promiseOps = {}
-                    i = 0
+                return await this.open(async db=>{
+                    let transaction = db.transaction(names, ...rest)
+                    ops.forEach(op=>{
+                        let { id } = op
+                        let p = this.doOp(op, transaction)
+                        p.then(promiseOps[id].r).catch(promiseOps[id])
+                        promises[id] = p
+                    })
+                    return new Promise((r, reject)=>{
+                        transaction.onerror = reject
+                        transaction.oncomplete = async e=>{
+                            this.debug('transaction complete: ', e)
+                            let res = (await Promise.all(Object.values(promises).sort((a, b)=>a.i - b.i))) || []
+                            r(res)
+                        }
+                        transaction.onabort = reject
+                    }).finally(()=>{
+                        ops = []
+                        promises = {}
+                        promiseOps = {}
+                        i = 0
+                    })
                 })
             },
             doOne(...rest){

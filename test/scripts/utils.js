@@ -25,7 +25,7 @@ module.exports = {
             let keys = Object.keys(msgsGetter)
             page.on('console', msg=>{
                 if(debug){
-                    console.log(`[${msg._type}]${msg._text}`)
+                    console.log(`[${msg._type}]${msg._text}\n\t${msg._stackTraceLocations.map(i=>`${i.url}(${i.lineNumber}:${i.columnNumber})`).join('\n\t')}`)
                 }
                 this._pushMessage(msgs, msg, contentFormatter)
                 keys.forEach(key=>{

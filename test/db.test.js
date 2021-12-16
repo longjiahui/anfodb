@@ -10,7 +10,8 @@ const utils = require('./scripts/utils')
 
 let server
 let browser
-before(async ()=>{
+before(async function(){
+    this.timeout(10000)
     server = await createServer({
         root: path.resolve(__dirname, '../debug'),
     })
@@ -23,18 +24,22 @@ after(async ()=>{
     await server?.close?.()
 })
 let page
-beforeEach(async()=>{
+beforeEach(async function(){
+    this.timeout(100000)
     pages = await browser.pages()
     page = pages?.[0] || await browser.newPage()
     await page.goto(`http://localhost:${server.port}`)
 })
-afterEach(async ()=>{
+afterEach(async function(){
+    this.timeout(5000)
     await utils.evaluate(page, async ()=>{
         // delete all databases
         let dbs = await indexedDB.databases()
-        await Promise.all(dbs.map(
-            db=>new Promise((r, reject)=>{
-                let req = indexedDB.deleteDatabase(db.name)
+        let names = dbs.map(db=>db.name)
+        dbs = null
+        await Promise.all(names.map(
+            name=>new Promise((r, reject)=>{
+                let req = indexedDB.deleteDatabase(name)
                 req.onerror = reject
                 req.onsuccess = r
             }).catch(err=>console.error(err))
@@ -71,7 +76,7 @@ describe('indexedDB lib', async ()=>{
                     content: 'world',
                 })
                 return await db.store('test').get(1)
-            })
+            }, {debug: true})
             assert(await v(ret, {
                 id: 1,
                 name: '=hello',
@@ -196,12 +201,12 @@ describe('indexedDB lib', async ()=>{
                 let ret = (await db.objectStoreNames()).includes('test')
                 console.timeEnd('hello')
                 return ret
-            }, {debug: true})
+            })
             assert(v(ret, true), 'add store failed')
         })
 
         it('delete store', async()=>{
-            let { ret, msgs } = await utils.evaluate(page, async()=>{
+            let { ret } = await utils.evaluate(page, async()=>{
                 let db = await(new DB({
                     db: 'test',
                     debug: 'debug',
@@ -222,5 +227,50 @@ describe('indexedDB lib', async ()=>{
             })
             assert(v(ret, true), 'add store failed')
         })
+
+        it('reject upgrade', async()=>{
+            let { ret } = await utils.evaluate(page, async()=>{
+                let db = await(new DB({
+                    db: 'test',
+                    debug: 'debug',
+                    stores: {
+                        test: {
+                            keyPath: 'id'
+                        }
+                    }
+                }).init())
+                
+                await (new DB({
+                    db: 'test',
+                    debug: 'debug',
+                    stores: {
+                    },
+                    upgradePromise: Promise.reject(),
+                }).init())
+            })
+        })
+
+        it('resolve upgrade', async()=>{
+            let { ret } = await utils.evaluate(page, async()=>{
+                let db = await(new DB({
+                    db: 'test',
+                    debug: 'debug',
+                    stores: {
+                        test: {
+                            keyPath: 'id'
+                        }
+                    }
+                }).init())
+                
+                await (new DB({
+                    db: 'test',
+                    debug: 'debug',
+                    stores: {
+                    },
+                    upgradePromise: Promise.resolve(),
+                }).init())
+            })
+        })
+
     })
 })

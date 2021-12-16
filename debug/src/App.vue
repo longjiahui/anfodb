@@ -18,14 +18,15 @@
 // db.store('testdedf').put({id: 1,a: 12, b: 123})
 import DB from '../../src/db'
 window.DB = DB
-let db = await(new DB({
-    db: 'test',
-    debug: 'debug',
-    stores: {test: {keyPath: 'id'}}
-}).init())
-let db1 = await db.open()
-let db2 = await db.open()
-console.log(db1, db2)
+// let db = await(new DB({
+//     db: 'test',
+//     debug: 'debug',
+//     stores: {testa: {keyPath: 'id'}}
+// }).init())
+// console.log('here')
+// db.open(db=>console.log(db))
+// console.log('there')
+// indexedDB.deleteDatabase('test').onsuccess = e=>console.log(e)
 </script>
 
 <template>

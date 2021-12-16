@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "vite debug",
-    "test": "mocha --timeout 150000"
+    "test": "mocha"
   },
   "dependencies": {
     "@anfo/validator": "^2.2.4",
