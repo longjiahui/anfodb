@@ -4,7 +4,6 @@ const Validator = require('@anfo/validator')
 const v = (...rest)=>new Validator().v(...rest)
 
 const puppeteer = require('puppeteer')
-const { createServer } = require('vite')
 
 const utils = require('./scripts/utils')
 
@@ -12,11 +11,10 @@ let server
 let browser
 before(async function(){
     this.timeout(10000)
-    server = await createServer({
-        root: path.resolve(__dirname, '../debug'),
+    server = utils.createServer({
+        public: path.resolve(__dirname, '../dist'),
     })
-    await server.listen()
-    server.port = server?.config?.server?.port
+    server.port = server.address().port
     browser = await puppeteer.launch()
 })
 after(async ()=>{
@@ -25,10 +23,10 @@ after(async ()=>{
 })
 let page
 beforeEach(async function(){
-    this.timeout(100000)
+    this.timeout(10000)
     pages = await browser.pages()
     page = pages?.[0] || await browser.newPage()
-    await page.goto(`http://localhost:${server.port}`)
+    await page.goto(`http://localhost:${server.port}/debug.html`)
 })
 afterEach(async function(){
     this.timeout(5000)
@@ -50,16 +48,18 @@ afterEach(async function(){
 
 describe('indexedDB lib', async ()=>{
     describe('regular use', async()=>{
-        it('no configs', async ()=>{
+        it('no configs', async function(){
+            this.timeout(3000)
+            await new Promise(r=>setTimeout(r, 2000))
             let { ret, msgs, db, hasError } = await utils.evaluate(page, ()=>{
-                let db = new DB()
+                let db = new AnfoDB()
             })
             assert(hasError && db.find(i=>i.type === 'error')?.errno === '-100', '没提供合适配置，没输出对应报错')
         })
 
         it('put get', async ()=>{
             let { ret } = await utils.evaluate(page, async ()=>{
-                let db = await (new DB({
+                let db = await (new AnfoDB({
                     db: 'test',
                     stores: {
                         test: {
@@ -86,7 +86,7 @@ describe('indexedDB lib', async ()=>{
 
         it('index get', async ()=>{
             let { ret } = await utils.evaluate(page, async ()=>{
-                let db = await(new DB({
+                let db = await(new AnfoDB({
                     db: 'test',
                     stores: {
                         test: {
@@ -113,7 +113,7 @@ describe('indexedDB lib', async ()=>{
 
         it('add index get', async ()=>{
             let { ret } = await utils.evaluate(page, async ()=>{
-                let db = await(new DB({
+                let db = await(new AnfoDB({
                     db: 'test',
                     stores: {
                         test: {
@@ -140,7 +140,7 @@ describe('indexedDB lib', async ()=>{
 
         it('put openCursor index', async ()=>{
             let { ret } = await utils.evaluate(page, async ()=>{
-                let db = await(new DB({
+                let db = await(new AnfoDB({
                     db: 'test',
                     stores: {
                         test: {
@@ -177,18 +177,92 @@ describe('indexedDB lib', async ()=>{
                 }
             }), '执行返回错误')
         })
+
+        it('count', async()=>{
+            let { ret } = await utils.evaluate(page, async ()=>{
+                let db = await (new AnfoDB({
+                    db: 'test',
+                    stores: {
+                        test: {
+                            keyPath: 'id',
+                        }
+                    }
+                })).init()
+                await db.store('test').put({id: 1, hello: 'hello', world: 'world'})
+                await db.store('test').put({id: 2, hello: 'hello', world: 'world'})
+                await db.store('test').put({id: 3, hello: 'hello', world: 'world'})
+                await db.store('test').put({id: 4, hello: 'hello', world: 'world'})
+                return await db.store('test').count()
+            }, {debug: true})
+            assert(ret === 4, '返回结果错误')
+        })
+        it('getAll delete', async function(){
+            this.timeout(5000)
+            let { ret } = await utils.evaluate(page, async ()=>{
+                let db = await (new AnfoDB({
+                    db: 'test',
+                    stores: {
+                        test: {
+                            keyPath: 'id',
+                            indexes: [
+                                ['hello', 'hello']
+                            ]
+                        }
+                    }
+                })).init()
+                await db.store('test').put({id: 1, hello: 'hello1', world: 'world'})
+                await db.store('test').put({id: 2, hello: 'hello2', world: 'world'})
+                await db.store('test').put({id: 3, hello: 'hello2', world: 'world'})
+                await db.store('test').put({id: 4, hello: 'hello4', world: 'world'})
+                await db.store('test').put({id: 5, hello: 'hello5', world: 'world'})
+                await db.store('test').delete(5)
+                await db.store('test').delete(IDBKeyRange.only(2))
+                return await db.store('test').getAll()
+            })
+            assert(await v(ret, {
+                $: 'array',
+                $subItem: {
+                    id: ['number', '=1 || =3 || =4'],
+                    hello: '=hello1 || =hello2 || =hello4',
+                    world: '=world',
+                },
+            }), '返回结果错误')
+        })
+        
+        it('clear', async function(){
+            this.timeout(5000)
+            let { ret } = await utils.evaluate(page, async ()=>{
+                let db = await (new AnfoDB({
+                    db: 'test',
+                    stores: {
+                        test: {
+                            keyPath: 'id',
+                            indexes: [
+                                ['hello', 'hello']
+                            ]
+                        }
+                    }
+                })).init()
+                await db.store('test').put({id: 1, hello: 'hello1', world: 'world'})
+                await db.store('test').put({id: 2, hello: 'hello2', world: 'world'})
+                await db.store('test').clear()
+                return await db.store('test').count()
+            })
+            assert(ret === 0, '返回结果错误')
+        })
     })
+
 
     describe('db version change', async ()=>{
         it('add store', async()=>{
             let { ret, msgs } = await utils.evaluate(page, async()=>{
-                let db = await(new DB({
+                let db = await(new AnfoDB({
                     db: 'test',
                     debug: 'debug',
                     stores: {}
                 }).init())
 
-                db = await(new DB({
+                db = await(new AnfoDB({
                     db: 'test',
                     debug: 'debug',
                     stores: {
@@ -207,7 +281,7 @@ describe('indexedDB lib', async ()=>{
 
         it('delete store', async()=>{
             let { ret } = await utils.evaluate(page, async()=>{
-                let db = await(new DB({
+                let db = await(new AnfoDB({
                     db: 'test',
                     debug: 'debug',
                     stores: {
@@ -217,7 +291,7 @@ describe('indexedDB lib', async ()=>{
                     }
                 }).init())
                 
-                db = await(new DB({
+                db = await(new AnfoDB({
                     db: 'test',
                     debug: 'debug',
                     stores: {}
@@ -230,7 +304,7 @@ describe('indexedDB lib', async ()=>{
 
         it('reject upgrade', async()=>{
             let { ret } = await utils.evaluate(page, async()=>{
-                let db = await(new DB({
+                let db = await(new AnfoDB({
                     db: 'test',
                     debug: 'debug',
                     stores: {
@@ -240,7 +314,7 @@ describe('indexedDB lib', async ()=>{
                     }
                 }).init())
                 
-                await (new DB({
+                await (new AnfoDB({
                     db: 'test',
                     debug: 'debug',
                     stores: {
@@ -250,9 +324,10 @@ describe('indexedDB lib', async ()=>{
             })
         })
 
-        it('resolve upgrade', async()=>{
+        it('resolve upgrade timeout(promise)', async function(){
+            this.timeout(3000)
             let { ret } = await utils.evaluate(page, async()=>{
-                let db = await(new DB({
+                let db = await(new AnfoDB({
                     db: 'test',
                     debug: 'debug',
                     stores: {
@@ -261,15 +336,44 @@ describe('indexedDB lib', async ()=>{
                         }
                     }
                 }).init())
-                
-                await (new DB({
+
+                let offset = Date.now()
+                await (new AnfoDB({
                     db: 'test',
                     debug: 'debug',
                     stores: {
                     },
-                    upgradePromise: Promise.resolve(),
+                    upgradePromise: new Promise(r=>setTimeout(r, 2000)),
                 }).init())
+                return Date.now() - offset
             })
+            assert(ret > 2000, 'timeout不生效')
+        })
+
+        it('resolve upgrade timeout(promiseFunction)', async function(){
+            this.timeout(3000)
+            let { ret } = await utils.evaluate(page, async()=>{
+                let db = await(new AnfoDB({
+                    db: 'test',
+                    debug: 'debug',
+                    stores: {
+                        test: {
+                            keyPath: 'id'
+                        }
+                    }
+                }).init())
+
+                let offset = Date.now()
+                await (new AnfoDB({
+                    db: 'test',
+                    debug: 'debug',
+                    stores: {
+                    },
+                    upgradePromise: ()=>new Promise(r=>setTimeout(r, 2000)),
+                }).init())
+                return Date.now() - offset
+            })
+            assert(ret > 2000, 'timeout不生效')
         })
 
     })

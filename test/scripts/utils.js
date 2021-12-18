@@ -1,3 +1,6 @@
+const handler = require("serve-handler")
+const http = require('http')
+
 module.exports = {
     _pushMessage(arr, msg, contentFormatter){
         let content = msg._text
@@ -49,4 +52,11 @@ module.exports = {
             }).catch(reject)
         })
     },
+
+    createServer(options = {}){
+        let server = http.createServer((req, res)=>{
+            return handler(req, res, options)
+        })
+        return server.listen()
+    }
 }

@@ -1,4 +1,8 @@
-import shortid from 'shortid'
+const shortid = {
+    generate(){
+        return (Math.random() + '').slice(2) + Date.now().toString(16)
+    }
+}
 
 // config格式
 /*
@@ -22,6 +26,13 @@ import shortid from 'shortid'
 }
 */
 
+/*
+    屏蔽了version的使用细节
+    当配置的数据库信息和实际数据库信息比对有异时自动执行升级
+    升级前添加promise来提示用户是否执行或先对数据库内容进行备份
+    与原生api相似的使用方法，但将返回改为Promise风格
+*/
+
 // index 会特殊处理
 let cmds = ['add', 'put', 'get', 'count', 'getAll', 'openCursor', 'delete', 'clear']
 let toCMDFuncs = func=>cmds.reduce((t, cmd, i)=>{
@@ -31,7 +42,8 @@ let toCMDFuncs = func=>cmds.reduce((t, cmd, i)=>{
 
 const ERR_CONFIG = -100     // 配置错误
 const ERR_UPGRADE = -101    // 升级失败
-export default class DB{
+const ERR_UNKONWN = -200    // 升级失败
+export default class AnfoDB {
 
     debug(...rest){
         if(['debug'].includes(this.config?.debug)){
@@ -54,7 +66,7 @@ export default class DB{
     }
 
     // async open(){
-    //     return DB._openDB(this.config.db).then(db=>{
+    //     return AnfoDB._openDB(this.config.db).then(db=>{
     //         // 检查当前版本是否与配置不符，如果不符则创建新的版本
     //         let difference = this._getDifferenceWithCurrentConfig(db)
     //         this.debug(`检查配置发现配置修改: `, difference)
@@ -107,7 +119,7 @@ export default class DB{
     //     })
     // }
     async open(handler){
-        return DB._openDB(this.config.db).then(db=>{
+        return AnfoDB._openDB(this.config.db).then(db=>{
             let ret = handler?.(db)
             db.close()
             db = null
@@ -184,6 +196,9 @@ export default class DB{
             return this
         }).catch(err=>{
             this._isInited = false
+            if(!err.errno){
+                err = this.makeError(ERR_UNKONWN, err.message)
+            }
             if(err.errno){
                 this.error(err.errno, '初始化失败', err.msg)
             }
@@ -219,7 +234,7 @@ export default class DB{
 
     doDiffItem(db, {type, data, config} = {}){
         let createStore = ()=>{
-            let store = db.createObjectStore(data, DB._getStoreCreateConfig(config))
+            let store = db.createObjectStore(data, AnfoDB._getStoreCreateConfig(config))
             config.indexes?.forEach(i=>{
                 store.createIndex(...i)
             })
@@ -272,7 +287,7 @@ export default class DB{
                     // keyPath, autoIncrement
                     let t = db.transaction([name], 'readonly')
                     let store = t.objectStore(name)
-                    let storeCreateConfig = DB._getStoreCreateConfig(config)
+                    let storeCreateConfig = AnfoDB._getStoreCreateConfig(config)
                     if((storeCreateConfig?.keyPath||'') !== (store.keyPath||'') ||
                         !!storeCreateConfig?.autoIncrement !== !!store.autoIncrement){
                         // modify store schemas
