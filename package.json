@@ -1,6 +1,6 @@
 {
   "name": "@anfo/db",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "dist/db.js",
   "scripts": {
     "dev": "vite debug",
